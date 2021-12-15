@@ -1,0 +1,210 @@
+function rfout = SMS_RF_prep(MrProt)
+flag_usemypulse = 0;
+%% ********************************************************************************
+%  retreive the basics from special card (or calculate otherwise from protocol)	
+l_LongEntry_SmsFactor = MrProt.spcl.g4.SMS_factor ;
+l_LongEntry_SmsShiftFactor = MrProt.spcl.g4.CAIPI_shift;
+b_Checkbox_SmsPhaseOptimise = MrProt.spcl.g4.SMS_RF_phase_optim;
+b_Checkbox_SmsOnlineRecon =  MrProt.spcl.g4.SMS_online_recon;
+l_LongEntry_RfDuration = MrProt.spcl.g5.RF_pulse_duration;
+
+l_frequencyBands    =  l_LongEntry_SmsFactor;
+b_centerSlices      =  false; 
+b_PhaseOptimisation =  b_Checkbox_SmsPhaseOptimise;
+l_PulseDuration      = l_LongEntry_RfDuration;
+
+%% ********************************************************************************/
+RFSAMPLES = 512;
+MAX_MPLX_SLICES = 16;
+TIME_PER_SAMPLE = l_PulseDuration / RFSAMPLES;
+freq = zeros(MAX_MPLX_SLICES,1);
+dynamicPhase = zeros(MAX_MPLX_SLICES,RFSAMPLES);
+afRFNewReal = zeros(MAX_MPLX_SLICES,RFSAMPLES);
+afRFNewImag = zeros(MAX_MPLX_SLICES,RFSAMPLES);
+afRFsamplesMplxReal = zeros(RFSAMPLES,1);
+afRFsamplesMplxImag = zeros(RFSAMPLES,1);
+slice_shifts = zeros(MAX_MPLX_SLICES,1); %%[mm]
+dMaxAbs = 0;
+dSumReal = 0; 
+dSumImag = 0;
+dAmplitudeIntegral = 0;
+k = 0; l = 0;
+
+
+%% and finally: our template and new RF objects
+%static sRF_PULSE_EXT    sSRF_TEMP("ExtExcTemp");
+%static sRF_PULSE_ARB    sSRF_MPLX("ArbExcMplx");
+
+%asRFsamplesBase = zeros(RFSAMPLES,1);
+%asRFsamplesMplx = zeros(RFSAMPLES,1);
+
+% Eric Wong's Phase optimization, see ISMRM 2012 #2209
+% this reduces the multiband peak voltage from linear with N to sqrt(N)
+adWongPhaseSchedule = zeros(MAX_MPLX_SLICES,MAX_MPLX_SLICES);
+adWongPhaseSchedule = ...
+    [0, 0,	   0,	  0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0; %// 1
+    0, 0,	   0,	  0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0; %    }, // 2
+    0, 0.730, 4.602, 0,	 0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0; %    }, // 3
+    0, 3.875, 5.940, 6.197, 0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0; %    }, // 4
+    0, 3.778, 5.335, 0.872, 0.471, 0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0; %    }, // 5
+    0, 2.005, 1.674, 5.012, 5.736, 4.123, 0,     0,     0,     0,     0,     0,     0,     0,     0,     0; %    }, // 6
+    0, 3.002, 5.998, 5.909, 2.624, 2.527, 2.440, 0,     0,     0,     0,     0,     0,     0,     0,     0; %    }, // 7
+    0, 1.036, 3.414, 3.778, 3.215, 1.756, 4.555, 2.467, 0,     0,     0,     0,     0,     0,     0,     0; %    }, // 8
+    0, 1.250, 1.783, 3.558, 0.739, 3.319, 1.296, 0.521, 5.332, 0,     0,     0,     0,     0,     0,     0; %    }, // 9
+    0, 4.418, 2.360, 0.677, 2.253, 3.472, 3.040, 3.974, 1.192, 2.510, 0,     0,     0,     0,     0,     0; %    }, // 10
+    0, 5.041, 4.285, 3.001, 5.765, 4.295, 0.056, 4.213, 6.040, 1.078, 2.759, 0,     0,     0,     0,     0; %    }, // 11
+    0, 2.755, 5.491, 4.447, 0.231, 2.499, 3.539, 2.931, 2.759, 5.376, 4.554, 3.479, 0,     0,     0,     0; %    }, // 12
+    0, 0.603, 0.009, 4.179, 4.361, 4.837, 0.816, 5.995, 4.150, 0.417, 1.520, 4.517, 1.729, 0,     0,     0; %    }, // 13
+    0, 3.997, 0.830, 5.712, 3.838, 0.084, 1.685, 5.328, 0.237, 0.506, 1.356, 4.025, 4.483, 4.084, 0,     0; %    }, // 14
+    0, 4.126, 2.266, 0.957, 4.603, 0.815, 3.475, 0.977, 1.449, 1.192, 0.148, 0.939, 2.531, 3.612, 4.801, 0; %    }, // 15
+    0, 4.359, 3.510, 4.410, 1.750, 3.357, 2.061, 5.948, 3.000, 2.822, 0.627, 2.768, 3.875, 4.173, 4.224, 5.941 ]; % // 16
+		
+%% ********************************************************************************/
+
+%// prepare the template pulse and extract the map/pha values
+sSRF_TEMP.TypeExcitation = 1;
+sSRF_TEMP.FlipAngle = MrProt.flipAngle;
+sSRF_TEMP.InitialPhase = 90.0;
+sSRF_TEMP.FamilyName = "SE2560A90.SE90_12A2_2";
+sSRF_TEMP.Duration = l_PulseDuration ; %//RFSAMPLES*TIME_PER_SAMPLE);
+sSRF_TEMP.Thickness = MrProt.sliceSeries.aFront.thickness;
+sSRF_TEMP.asRFsamplesBase = read_RF_pta('I:\pulseq-master\matlab\Spiral\RF_design\RFdta_file\SE2560A90.SE90_12A2_2.pta');
+%//get samples from base pulse - magnitude: 0->1 and phase:0->2PI
+% this is a very important tip
+%sSRF_TEMP.getEnvelopeSamples (pMrProt,pSeqExpo, asRFsamplesBase);
+if flag_usemypulse == 1
+    lims_local = mr.opts('MaxGrad',200,'GradUnit','mT/m',...
+        'MaxSlew',200,'SlewUnit','T/m/s',...
+        'adcDeadTime', 10e-6,'rfRasterTime',1e-6);
+    slice_thickness = MrProt.sliceGroupList(1).thickness;
+    [rf0, ~, ~] = mr.makeSincPulse(MrProt.flipAngle/180*pi,'SliceThickness',slice_thickness, ...
+        'Duration',MrProt.spcl.g5.RF_pulse_duration/1e6,'system',lims_local,'timeBwProduct',MrProt.spcl.g5.RF_BWTP,'apodization',0.5);
+    rf0.signal = interp1([1:length(rf0.signal)]',rf0.signal(:),[MrProt.spcl.g5.RF_pulse_duration/RFSAMPLES/2:MrProt.spcl.g5.RF_pulse_duration/RFSAMPLES:length(rf0.signal)]');
+end
+%% //determine all the slice positions in mm
+slice_gap_mm = - MrProt.sliceSeries.size / l_frequencyBands  * MrProt.sliceGroupList(1).distance;
+for k=1:l_frequencyBands
+    if (b_centerSlices)
+        slice_shifts(k) = (- (l_frequencyBands-1)/2 + double(k-1) ) * slice_gap_mm;       %// slices symmetric about iso-centre
+    else
+        slice_shifts(k) = - (k-1) * slice_gap_mm;											%// outmost slice sits at iso centre
+    end
+end
+
+
+sSRF_TEMP = calcRFparam(sSRF_TEMP, MrProt);
+
+if flag_usemypulse
+    rf0.signal = rf0.signal/max(abs(rf0.signal(:)));
+    sSRF_TEMP.asRFsamplesBase.abs = abs(rf0.signal(:));
+    sSRF_TEMP.asRFsamplesBase.ph = angle(rf0.signal(:));
+end
+
+asRFsamplesBase = sSRF_TEMP.asRFsamplesBase;
+
+%% //loop over slices; for each slice, generate the frequency shifted version of the original pulse
+
+% % original CPP code (verified)
+% for k=1:l_frequencyBands
+%     %//convert to offresonance frequency in Hertz
+%     freq(k) =  sSRF_TEMP.LarmorConst*slice_shifts(k)*sSRF_TEMP.GPSSel_Amplitude; %//[MHz/T * mm * mT/m = Hz]
+%     %//off resonance phase ramp along each pulse in radians
+%     for l = 1:RFSAMPLES
+%         dynamicPhase(k,l) = 2*pi()* freq(k) * (l-1) * (TIME_PER_SAMPLE /(1000.0* 1000.0));
+%     end
+%     %//phase modulate the original pulse by complex multiplication, and apply Wongs Phase optimasation if desired
+%     for l= 1:RFSAMPLES
+%         if (b_PhaseOptimisation)
+%             afRFNewReal(k,l) = asRFsamplesBase.abs(l) * cos( dynamicPhase(k,l) + asRFsamplesBase.ph(l) + adWongPhaseSchedule(ceil(l_frequencyBands-1)+1,k) );
+%             afRFNewImag(k,l) = asRFsamplesBase.abs(l) * sin( dynamicPhase(k,l) + asRFsamplesBase.ph(l) + adWongPhaseSchedule(ceil(l_frequencyBands-1)+1,k) );           
+%         else
+%             afRFNewReal(k,l) = asRFsamplesBase.abs(l) * cos( dynamicPhase(k,l) + asRFsamplesBase.ph(l) );
+%             afRFNewImag(k,l) = asRFsamplesBase.abs(l) * sin( dynamicPhase(k,l) + asRFsamplesBase.ph(l) );
+%         end
+%     end
+% end
+% % end of original CPP code (verified)
+
+%//convert to offresonance frequency in Hertz
+freq =  sSRF_TEMP.LarmorConst*slice_shifts*sSRF_TEMP.GPSSel_Amplitude; %//[MHz/T * mm * mT/m = Hz]
+%//off resonance phase ramp along each pulse in radians
+for k=1:l_frequencyBands
+    dynamicPhase(k,:) = 2*pi()* freq(k) * [0:RFSAMPLES-1] * (TIME_PER_SAMPLE /(1000.0* 1000.0));
+end
+%// phase modulation 
+for k=1:l_frequencyBands
+    if (b_PhaseOptimisation)
+        afRFNewReal(k,:) = asRFsamplesBase.abs(:) .* cos( dynamicPhase(k,:)' + asRFsamplesBase.ph(:) + adWongPhaseSchedule(ceil(l_frequencyBands-1)+1,k) );
+        afRFNewImag(k,:) = asRFsamplesBase.abs(:) .* sin( dynamicPhase(k,:)' + asRFsamplesBase.ph(:) + adWongPhaseSchedule(ceil(l_frequencyBands-1)+1,k) );
+    else
+        afRFNewReal(k,:) = asRFsamplesBase.abs(:) .* cos( dynamicPhase(k,:)' + asRFsamplesBase.ph(:) );
+        afRFNewImag(k,:) = asRFsamplesBase.abs(:) .* sin( dynamicPhase(k,:)' + asRFsamplesBase.ph(:) );
+    end
+end
+%% //loop over slices to add all the pulses together
+
+% origianl CPP code (verified)
+% afRFsamplesMplxReal = zeros(RFSAMPLES,1);
+% afRFsamplesMplxImag = zeros(RFSAMPLES,1);
+% for k = 1:l_frequencyBands
+%     for l = 1:RFSAMPLES
+%         afRFsamplesMplxReal(l) = afRFsamplesMplxReal(l) + afRFNewReal(k,l);
+%         afRFsamplesMplxImag(l) = afRFsamplesMplxImag(l) + afRFNewImag(k,l);
+%     end
+% end
+
+% my code
+afRFsamplesMplxReal = sum(afRFNewReal,1);
+afRFsamplesMplxImag = sum(afRFNewImag,1);
+%% //finally: convert the composite pulse back to magnitude and phase
+dMaxAbs = 0;
+for l = 1:RFSAMPLES
+    
+    asRFsamplesMplx.abs(l) = sqrt(afRFsamplesMplxReal(l)*afRFsamplesMplxReal(l) + afRFsamplesMplxImag(l)*afRFsamplesMplxImag(l));
+    asRFsamplesMplx.ph(l) = atan2(afRFsamplesMplxImag(l) , afRFsamplesMplxReal(l)  );
+    
+    %// scale magnitude down by multiplex factor
+    asRFsamplesMplx.abs(l)  = asRFsamplesMplx.abs(l)  / l_frequencyBands;
+    
+    %// find the actual maximum value for correction of amplitude integral
+    %if (asRFsamplesMplx.abs(l)  > dMaxAbs )
+    %    dMaxAbs = asRFsamplesMplx.abs(l) ;
+    %end
+    
+    %//wrap the phase
+    if(asRFsamplesMplx.ph(l) < 0)
+        asRFsamplesMplx.ph(l) = asRFsamplesMplx.ph(l)+2*pi();
+    end
+end
+dMaxAbs = max(asRFsamplesMplx.abs(:)) ;
+
+%// determine the amplitude integral from the *unmodulated original pulse*
+%//divide by l_frequencyBands and apply correction factor (in case composite pulse maximum deviates from 1)
+dSumReal =0; dSumImag =0;
+for l = 1:RFSAMPLES
+    
+    dSumReal = dSumReal + asRFsamplesBase.abs(l) * cos( asRFsamplesBase.ph(l) );
+    dSumImag = dSumImag + asRFsamplesBase.abs(l) * sin( asRFsamplesBase.ph(l) );
+end
+dAmplitudeIntegral = sqrt(dSumReal*dSumReal + dSumImag*dSumImag) / l_frequencyBands  / dMaxAbs;
+
+
+
+%% // set attributes and prepare our multiplexed sRF_PULSE_ARB
+%sSRF_MPLX.setTypeExcitation		();
+sSRF_MPLX.SampleSize = RFSAMPLES;
+sSRF_MPLX.InitialPhase = 90.0;
+sSRF_MPLX.Duration = l_PulseDuration ; %//RFSAMPLES*TIME_PER_SAMPLE);
+sSRF_MPLX.FlipAngle = MrProt.flipAngle;
+sSRF_MPLX.Thickness = MrProt.sliceSeries.aFront.thickness;
+%//copy some from  template pulse...
+sSRF_MPLX.GSAmplitude = sSRF_TEMP.GPSSel_Amplitude;
+sSRF_MPLX.GPSSel_Amplitude = sSRF_TEMP.GPSSel_Amplitude;
+%sSRF_MPLX.setRequiredGSPolarity ( sSRF_TEMP.getRequiredGSPolarity()  );
+
+% IDEA Prep of Arbitrary Pulse
+% sSRF_MPLX.prepArbitrary (pMrProt,pSeqExpo,asRFsamplesMplx,dAmplitudeIntegral)
+for i = 1:RFSAMPLES
+    sSRF_MPLX.rf(i) = asRFsamplesMplx.abs(i)*exp(1i*asRFsamplesMplx.ph(i));
+end
+rfout = sSRF_MPLX;
