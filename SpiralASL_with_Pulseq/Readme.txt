@@ -4,4 +4,5 @@ For different localized settings please make changes accordingly in
 ASL_FAIRQUIPSSII_spiral_sosp_invivo.m, to the variable buildpath and workpath
 
 
-The code was tested to work on Matlab R2020a
+The code has been tested to work on Matlab R2020a
+Current it is under further improvement for being more user-friendly.
