@@ -22,7 +22,7 @@ CSatFat.csat_RF.rf.freqOffset = -CSatFat.csat_RF.rf.freqOffset;
 run('I:\pulseq-master\matlab\Spiral\ASL_FAIRQUIPSSII_spiral_mbsb_addBlock_invivo.m')
 %seq.write('C:\Users\P70071217\WMWare_share\pulseq\sequences\test_0411\asl_mbsb.seq');
 %% save data
-save_dir = 'Z:\R.Ma\to_test_07_30\';
+save_dir = 'Z:\test\to_test_07_30\'; % change it accordingly
 RZ = MrProt.spcl.private.increm_mode_sl;
 RXY = MrProt.spcl.private.rotate_mode_ax;
 iPAT = num2str(MrProt.spcl.accr_kz);
@@ -35,42 +35,8 @@ end
 namestr = strcat(save_dir,'external_h45_','iPAT',iPAT,'_RZ',RZ,'_RXY',RXY,'.seq');
 seq.write(namestr);
 
-% define name:
-%% save k traj
 
-clear kx_evol ky_evol kz_evol
-for ll = 1:length(spiral.gx_seg)
-    for i = 1:length(spiral.gx_seg(1).shot)
-        counti = 1;
-        for j = 1:length(spiral.gx_seg(1).shot(1).kslice)
-            for k = 1:length(spiral.gx_seg(ll).shot(i).kslice(j).grad)
-                if counti == 1
-                    kx_evol(ll,i,counti) = spiral.gx_seg(ll).shot(i).kslice(j).grad(k);
-                    ky_evol(ll,i,counti) = spiral.gy_seg(ll).shot(i).kslice(j).grad(k);
-                    kz_evol(ll,i,counti) = spiral.gz_seg(ll).shot(i).kslice(j).grad(k);
-                else
-                    kx_evol(ll,i,counti) = kx_evol(ll,i,counti-1)+spiral.gx_seg(ll).shot(i).kslice(j).grad(k);
-                    ky_evol(ll,i,counti) = ky_evol(ll,i,counti-1)+spiral.gy_seg(ll).shot(i).kslice(j).grad(k);
-                    kz_evol(ll,i,counti) = kz_evol(ll,i,counti-1)+spiral.gz_seg(ll).shot(i).kslice(j).grad(k);
-                end
-                counti = counti+1;
-            end
-        end
-    end
-end
-kx_evol = single(kx_evol)/100*2*pi*43.576;
-ky_evol = single(ky_evol)/100*2*pi*43.576;
-kz_evol = single(kz_evol)/100*2*pi*43.576;
-%%
-seg = 1;nn=1;
-figure,
-for i = 1:size(kx_evol,2)
-    scatter3(kx_evol(seg,i,1:end/nn),ky_evol(seg,i,1:end/nn),kz_evol(seg,i,1:end/nn),'b.');
-    hold on;
-end
-namestr = strcat(save_dir,'ktraj_h45_','iPAT',iPAT,'_RZ',RZ,'_RXY',RXY,'.mat');
-save(namestr,'kx_evol','ky_evol','kz_evol');
-%%
+%% optional: if you want to see the trajectory
 counti=1;
 for i = 1:10240*1.2*2.5/10-2
     if counti == 1
