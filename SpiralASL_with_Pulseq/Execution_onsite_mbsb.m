@@ -1,4 +1,5 @@
 %clear all
+% for 2D sequences - single-band, or multi-band
 MrProt.sliceGroupList(1).shift = 0; % 5.7 L, 28.6 A, 48.0 H
 MrProt.sliceGroupList(1).thickness = 1.2; %mm
 MrProt.sliceGroupList(1).sliceperslab = 40;
