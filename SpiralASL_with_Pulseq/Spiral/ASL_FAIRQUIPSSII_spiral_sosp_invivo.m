@@ -1,4 +1,4 @@
-buildpath = 'I:\pulseq-master\matlab\SpiralASL_with_Pulseq\';
+buildpath = 'I:\pulseq-master\matlab\Spiral';
 workpath = 'I:\pulseq-master\matlab';
 
 addpath(fullfile(buildpath,'FPasl'));
